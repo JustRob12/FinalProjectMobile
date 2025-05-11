@@ -101,7 +101,70 @@ const login = async (req, res) => {
   }
 };
 
+// Google Sign-In controller
+const googleSignIn = async (req, res) => {
+  try {
+    const { email, googleId, name } = req.body;
+    console.log('Google Sign-In attempt for:', { email, googleId, name });
+
+    // Check if user exists with this email
+    const [existingUsers] = await db.query(
+      'SELECT * FROM users WHERE email = ? OR google_id = ?',
+      [email, googleId]
+    );
+
+    let user;
+    if (existingUsers.length > 0) {
+      // User exists, update Google ID if needed
+      user = existingUsers[0];
+      if (!user.google_id) {
+        await db.query(
+          'UPDATE users SET google_id = ? WHERE id = ?',
+          [googleId, user.id]
+        );
+        user.google_id = googleId;
+      }
+    } else {
+      // Create new user
+      const [result] = await db.query(
+        'INSERT INTO users (username, email, google_id) VALUES (?, ?, ?)',
+        [name, email, googleId]
+      );
+      user = {
+        id: result.insertId,
+        username: name,
+        email,
+        google_id: googleId
+      };
+    }
+
+    // Create token
+    const token = jwt.sign(
+      { userId: user.id },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    res.json({
+      message: 'Google Sign-In successful',
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email
+      }
+    });
+  } catch (error) {
+    console.error('Google Sign-In error:', error);
+    res.status(500).json({ 
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 module.exports = {
   register,
-  login
+  login,
+  googleSignIn
 }; 

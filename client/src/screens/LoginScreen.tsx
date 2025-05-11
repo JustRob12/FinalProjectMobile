@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -8,12 +8,18 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
-import { Input, Button, Text } from 'react-native-elements';
+import { Input, Button, Text, Divider } from 'react-native-elements';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
 import api from '../config/api';
 import { AuthResponse } from '../types/auth';
+import { auth } from '../config/firebase';
+import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+
+WebBrowser.maybeCompleteAuthSession();
 
 type RootStackParamList = {
   Login: undefined;
@@ -28,6 +34,46 @@ const LoginScreen = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    clientId: '947230923909-XXXXX.apps.googleusercontent.com',  // Replace XXXXX with the actual client ID
+    scopes: ['profile', 'email'],
+    responseType: "id_token",
+  });
+
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { id_token } = response.params;
+      const credential = GoogleAuthProvider.credential(id_token);
+      signInWithCredential(auth, credential)
+        .then(async (result) => {
+          const user = result.user;
+          // Send the user info to your backend
+          try {
+            const response = await api.post<AuthResponse>('/api/auth/google', {
+              email: user.email,
+              googleId: user.uid,
+              name: user.displayName,
+            });
+
+            // Store token and user data
+            await AsyncStorage.multiSet([
+              ['userToken', response.data.token],
+              ['userData', JSON.stringify(response.data.user)]
+            ]);
+
+            console.log('Google Sign-In successful');
+          } catch (error: any) {
+            console.error('Backend error:', error);
+            Alert.alert('Error', 'Failed to authenticate with backend');
+          }
+        })
+        .catch((error) => {
+          console.error('Firebase error:', error);
+          Alert.alert('Error', 'Failed to sign in with Google');
+        });
+    }
+  }, [response]);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -114,6 +160,25 @@ const LoginScreen = () => {
             buttonStyle={styles.button}
           />
 
+          <View style={styles.dividerContainer}>
+            <Divider style={styles.divider} />
+            <Text style={styles.dividerText}>OR</Text>
+            <Divider style={styles.divider} />
+          </View>
+
+          <Button
+            title="Sign in with Google"
+            onPress={() => promptAsync()}
+            loading={loading}
+            icon={{
+              name: 'google',
+              type: 'font-awesome',
+              color: 'white',
+            }}
+            containerStyle={styles.googleButtonContainer}
+            buttonStyle={styles.googleButton}
+          />
+
           <TouchableOpacity
             onPress={() => navigation.navigate('Register')}
             style={styles.registerLink}
@@ -161,6 +226,29 @@ const styles = StyleSheet.create({
   registerText: {
     color: '#2089dc',
     fontSize: 16,
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  divider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E0E0E0',
+  },
+  dividerText: {
+    marginHorizontal: 10,
+    color: '#666',
+  },
+  googleButtonContainer: {
+    marginTop: 10,
+    width: '100%',
+  },
+  googleButton: {
+    backgroundColor: '#DB4437',
+    borderRadius: 25,
+    height: 50,
   },
 });
 
